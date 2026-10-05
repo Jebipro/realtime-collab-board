@@ -14,8 +14,7 @@ interface Member {
   send: Send;
 }
 
-/** How many applied opIds a room remembers for retry de-duplication. */
-const OP_HISTORY = 2000;
+type Receipt = Extract<ServerMessage, { type: "op" | "reject" }>;
 
 /**
  * One board. Owns the authoritative card state and the room revision.
@@ -24,8 +23,9 @@ const OP_HISTORY = 2000;
 export class Room {
   private cards: Cards = {};
   private revision = 0;
-  /** opId -> revision it was applied at, insertion-ordered for FIFO eviction. */
-  private applied = new Map<string, number>();
+  // Retained for the room lifetime: a disconnected client can retry arbitrarily late.
+  // Store the canonical outcome, including rejections, rather than echoing retry input.
+  private receipts = new Map<string, { clientId: string; message: Receipt }>();
   private members = new Map<string, Member>();
 
   constructor(readonly id: string) {}
@@ -66,19 +66,23 @@ export class Room {
     this.broadcastPresence();
   }
 
-  sync(clientId: string) {
-    this.members.get(clientId)?.send({ type: "snapshot", snapshot: this.snapshot() });
+  sync(clientId: string, source?: Send) {
+    const member = this.members.get(clientId);
+    if (!member || (source && member.send !== source)) return;
+    member.send({ type: "snapshot", snapshot: this.snapshot() });
   }
 
-  handleOp(clientId: string, op: Op) {
+  handleOp(clientId: string, op: Op, source?: Send) {
     const member = this.members.get(clientId);
-    if (!member) return;
+    if (!member || (source && member.send !== source)) return;
 
     // A retry of an op we already applied (e.g. ack lost during a disconnect):
     // acknowledge to the sender only, at its original revision, without re-applying.
-    const appliedAt = this.applied.get(op.opId);
-    if (appliedAt !== undefined) {
-      member.send({ type: "op", revision: appliedAt, op, by: clientId });
+    const receipt = this.receipts.get(op.opId);
+    if (receipt) {
+      member.send(receipt.clientId === clientId ? receipt.message : {
+        type: "reject", opId: op.opId, reason: "invalid", message: "다른 사용자가 이미 사용한 opId입니다.",
+      });
       return;
     }
 
@@ -87,17 +91,17 @@ export class Room {
 
     const result = applyOp(this.cards, op, clientId, MAX_CARDS_PER_ROOM);
     if (!result.ok) {
-      member.send({ type: "reject", opId: op.opId, reason: result.reason, message: result.message });
+      const message: Receipt = { type: "reject", opId: op.opId, reason: result.reason, message: result.message };
+      this.receipts.set(op.opId, { clientId, message });
+      member.send(message);
       return;
     }
 
     this.cards = result.cards;
     this.revision += 1;
-    this.applied.set(op.opId, this.revision);
-    if (this.applied.size > OP_HISTORY) {
-      this.applied.delete(this.applied.keys().next().value!);
-    }
-    this.broadcast({ type: "op", revision: this.revision, op, by: clientId });
+    const message: Receipt = { type: "op", revision: this.revision, op, by: clientId };
+    this.receipts.set(op.opId, { clientId, message });
+    this.broadcast(message);
   }
 
   private broadcastPresence() {

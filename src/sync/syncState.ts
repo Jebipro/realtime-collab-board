@@ -14,6 +14,10 @@ export interface PendingOp {
   op: Op;
   /** Whether the op has been written to the current socket. Reset on disconnect. */
   sent: boolean;
+  /** Survives disconnect: the server may already have applied this op. */
+  attempted?: boolean;
+  /** After a snapshot, ambiguous in-flight ops await their receipt before replay. */
+  replay?: boolean;
 }
 
 export interface SyncState {
@@ -24,6 +28,8 @@ export interface SyncState {
   view: Cards;
   /** Set after a revision gap; incoming ops are skipped until a snapshot arrives. */
   awaitingSnapshot: boolean;
+  /** Rejected text is recoverable by the existing card editor, independently of rollback. */
+  rejectedEdits: ReadonlyMap<string, Extract<Op, { kind: "card.update" }>>;
 }
 
 export const initialSyncState: SyncState = {
@@ -33,12 +39,14 @@ export const initialSyncState: SyncState = {
   pending: [],
   view: {},
   awaitingSnapshot: false,
+  rejectedEdits: new Map(),
 };
 
 /** Replays pending ops over confirmed state. Ops that no longer apply are skipped in the view. */
 export function deriveView(confirmed: Cards, pending: PendingOp[], selfId: string): Cards {
   let cards = confirmed;
   for (const p of pending) {
+    if (p.replay === false) continue;
     const r = applyOp(cards, p.op, selfId);
     if (r.ok) cards = r.cards;
   }
@@ -49,6 +57,7 @@ const withPending = (s: SyncState, pending: PendingOp[], selfId: string): SyncSt
   ...s,
   pending,
   view: deriveView(s.confirmed, pending, selfId),
+  rejectedEdits: new Map([...s.rejectedEdits].filter(([id]) => Object.hasOwn(s.confirmed, id))),
 });
 
 export type LocalResult =
@@ -63,15 +72,17 @@ export function applyLocal(s: SyncState, op: Op, selfId: string): LocalResult {
   // Coalesce: a not-yet-sent move of the same card is superseded by this one
   // (keeps the offline queue small during drags).
   const last = pending[pending.length - 1];
-  if (op.kind === "card.move" && last && !last.sent && last.op.kind === "card.move" && last.op.cardId === op.cardId) {
+  if (op.kind === "card.move" && last && !last.sent && !last.attempted && last.op.kind === "card.move" && last.op.cardId === op.cardId) {
     pending = pending.slice(0, -1);
   }
-  return { ok: true, state: { ...s, pending: [...pending, { op, sent: false }], view: check.cards } };
+  const rejectedEdits = new Map(s.rejectedEdits);
+  if (op.kind === "card.update" || op.kind === "card.delete") rejectedEdits.delete(op.cardId);
+  return { ok: true, state: { ...s, rejectedEdits, pending: [...pending, { op, sent: false }], view: check.cards } };
 }
 
 export function markSent(s: SyncState, opIds: ReadonlySet<string>): SyncState {
   if (opIds.size === 0) return s;
-  return { ...s, pending: s.pending.map((p) => (opIds.has(p.op.opId) ? { ...p, sent: true } : p)) };
+  return { ...s, pending: s.pending.map((p) => (opIds.has(p.op.opId) ? { ...p, sent: true, attempted: true } : p)) };
 }
 
 export function markAllUnsent(s: SyncState): SyncState {
@@ -80,13 +91,16 @@ export function markAllUnsent(s: SyncState): SyncState {
 
 export function applySnapshot(s: SyncState, snap: Snapshot, selfId: string): SyncState {
   const confirmed = cardsFromList(snap.cards);
+  const pending = s.pending.map((p) => p.attempted ? { ...p, replay: false } : p);
   return {
     ...s,
     loaded: true,
     confirmed,
+    pending,
     revision: snap.revision,
     awaitingSnapshot: false,
-    view: deriveView(confirmed, s.pending, selfId),
+    view: deriveView(confirmed, pending, selfId),
+    rejectedEdits: new Map([...s.rejectedEdits].filter(([id]) => Object.hasOwn(confirmed, id))),
   };
 }
 
@@ -97,7 +111,7 @@ export function applyServerOp(
   msg: { revision: number; op: Op; by: string },
   selfId: string,
 ): ServerOpResult {
-  const isMine = s.pending.some((p) => p.op.opId === msg.op.opId);
+  const isMine = msg.by === selfId && s.pending.some((p) => p.op.opId === msg.op.opId);
   const pending = isMine ? s.pending.filter((p) => p.op.opId !== msg.op.opId) : s.pending;
 
   // Already reflected in confirmed (duplicate ack after a resend), or we're
@@ -115,7 +129,7 @@ export function applyServerOp(
   }
   const confirmed = r.cards;
   return {
-    state: { ...s, confirmed, revision: msg.revision, pending, view: deriveView(confirmed, pending, selfId) },
+    state: { ...withPending({ ...s, confirmed }, pending, selfId), revision: msg.revision },
     needsSync: false,
   };
 }
@@ -123,7 +137,9 @@ export function applyServerOp(
 export function applyReject(s: SyncState, opId: string, selfId: string): { state: SyncState; op: Op | null } {
   const entry = s.pending.find((p) => p.op.opId === opId);
   if (!entry) return { state: s, op: null };
-  return { state: withPending(s, s.pending.filter((p) => p !== entry), selfId), op: entry.op };
+  const rejectedEdits = new Map(s.rejectedEdits);
+  if (entry.op.kind === "card.update") rejectedEdits.set(entry.op.cardId, entry.op);
+  return { state: withPending({ ...s, rejectedEdits }, s.pending.filter((p) => p !== entry), selfId), op: entry.op };
 }
 
 /** A card with an unacknowledged text edit can't be edited again until it settles. */

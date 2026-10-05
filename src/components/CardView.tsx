@@ -1,5 +1,5 @@
 import { memo, useEffect, useMemo, useRef, useState, type KeyboardEvent, type PointerEvent } from "react";
-import { MAX_TEXT_LENGTH, type Card } from "../../shared/protocol";
+import { MAX_TEXT_LENGTH, type Card, type Op } from "../../shared/protocol";
 import { throttle } from "../util";
 
 const DRAG_THRESHOLD = 4;
@@ -16,7 +16,8 @@ interface Props {
   autoEdit: boolean;
   onAutoEditConsumed: () => void;
   onMove: (cardId: string, x: number, y: number) => void;
-  onSave: (card: Card, text: string, baseTextVersion: number) => void;
+  onSave: (card: Card, text: string, baseTextVersion: number) => boolean;
+  rejectedEdit?: Extract<Op, { kind: "card.update" }>;
   onDelete: (cardId: string) => void;
 }
 
@@ -38,11 +39,15 @@ interface Edit {
 }
 
 export const CardView = memo(function CardView(props: Props) {
-  const { card, pending, textLocked, autoEdit, onAutoEditConsumed, onMove, onSave, onDelete } = props;
+  const { card, pending, textLocked, autoEdit, onAutoEditConsumed, onMove, onSave, onDelete, rejectedEdit } = props;
   const rootRef = useRef<HTMLDivElement>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const [drag, setDrag] = useState<Drag | null>(null);
   const [edit, setEdit] = useState<Edit | null>(null);
+
+  useEffect(() => {
+    if (rejectedEdit) setEdit({ draft: rejectedEdit.text, base: rejectedEdit.baseTextVersion });
+  }, [rejectedEdit]);
 
   const sendMove = useMemo(() => throttle(onMove, DRAG_SEND_MS), [onMove]);
   useEffect(() => () => sendMove.cancel(), [sendMove]);
@@ -83,8 +88,8 @@ export const CardView = memo(function CardView(props: Props) {
       textareaRef.current?.focus();
       return;
     }
+    if (commit && changed && !onSave(card, current.draft, current.base)) return;
     editRef.current = null;
-    if (commit && changed) onSave(card, current.draft, current.base);
     setEdit(null);
     rootRef.current?.focus();
   };

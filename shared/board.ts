@@ -30,13 +30,13 @@ function withOnTop(cards: Cards, card: Card): Cards {
 export function applyOp(cards: Cards, op: Op, by: string, maxCards = Infinity): ApplyResult {
   switch (op.kind) {
     case "card.create": {
-      if (cards[op.card.id]) return fail("duplicate_id", "같은 id의 카드가 이미 있습니다.");
+      if (Object.hasOwn(cards, op.card.id)) return fail("duplicate_id", "같은 id의 카드가 이미 있습니다.");
       if (Object.keys(cards).length >= maxCards) return fail("limit", "보드의 카드 수 한도에 도달했습니다.");
       const card: Card = { ...op.card, textVersion: 0, createdBy: by };
       return { ok: true, cards: { ...cards, [card.id]: card } };
     }
     case "card.update": {
-      const card = cards[op.cardId];
+      const card = Object.hasOwn(cards, op.cardId) ? cards[op.cardId] : undefined;
       if (!card) return fail("not_found", "카드가 이미 삭제되었습니다.");
       if (card.textVersion !== op.baseTextVersion)
         return fail("stale", "다른 사용자가 먼저 이 카드를 수정했습니다.");
@@ -46,12 +46,12 @@ export function applyOp(cards: Cards, op: Op, by: string, maxCards = Infinity): 
       };
     }
     case "card.move": {
-      const card = cards[op.cardId];
+      const card = Object.hasOwn(cards, op.cardId) ? cards[op.cardId] : undefined;
       if (!card) return fail("not_found", "카드가 이미 삭제되었습니다.");
       return { ok: true, cards: withOnTop(cards, { ...card, x: op.x, y: op.y }) };
     }
     case "card.delete": {
-      if (!cards[op.cardId]) return fail("not_found", "카드가 이미 삭제되었습니다.");
+      if (!Object.hasOwn(cards, op.cardId)) return fail("not_found", "카드가 이미 삭제되었습니다.");
       const { [op.cardId]: _removed, ...rest } = cards;
       return { ok: true, cards: rest };
     }
@@ -59,7 +59,5 @@ export function applyOp(cards: Cards, op: Op, by: string, maxCards = Infinity): 
 }
 
 export function cardsFromList(list: Card[]): Cards {
-  const out: Record<string, Card> = {};
-  for (const c of list) out[c.id] = c;
-  return out;
+  return Object.fromEntries(list.map((c) => [c.id, c]));
 }

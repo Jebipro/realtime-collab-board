@@ -145,6 +145,12 @@ export class BoardClient {
 
   private connect() {
     if (this.disposed) return;
+    this.clearTimers();
+    const previous = this.ws;
+    this.ws = null; // invalidate every callback before closing the old connection
+    this.joined = false;
+    previous?.close(1000, "retry");
+    this.update({ sync: markAllUnsent(this.state.sync), participants: [] });
     const reconnecting = this.state.connection.attempt > 0;
     this.setConnection({ status: reconnecting ? "reconnecting" : "connecting", nextRetryAt: null });
 
@@ -159,13 +165,23 @@ export class BoardClient {
     this.joined = false;
 
     this.connectTimer = setTimeout(() => {
-      if (!this.joined) ws.close(4002, "connect timeout");
+      if (this.ws === ws && !this.joined) ws.close(4002, "connect timeout");
     }, CONNECT_TIMEOUT_MS);
 
-    ws.onopen = () => this.send({ type: "join", roomId: this.roomId, clientId: this.clientId, name: this.name });
+    ws.onopen = () => {
+      if (this.ws !== ws || this.disposed) return;
+      this.send({ type: "join", roomId: this.roomId, clientId: this.clientId, name: this.name });
+    };
     ws.onmessage = (ev) => {
+      if (this.ws !== ws || this.disposed) return;
       const msg = parseServerMessage(String(ev.data));
-      if (msg) this.onMessage(msg);
+      if (!msg) {
+        ws.close(4004, "invalid server message");
+        return;
+      }
+      if (!this.joined && msg.type !== "welcome" && msg.type !== "error") return;
+      if (msg.type === "welcome" && (this.joined || msg.self.clientId !== this.clientId)) return;
+      this.onMessage(msg);
     };
     ws.onclose = (ev) => {
       if (this.ws !== ws) return;
@@ -204,7 +220,12 @@ export class BoardClient {
 
   private onBrowserOffline = () => {
     this.clearTimers();
-    this.ws?.close(4003, "browser offline");
+    const ws = this.ws;
+    this.ws = null;
+    this.joined = false;
+    ws?.close(4003, "browser offline");
+    this.update({ sync: markAllUnsent(this.state.sync), participants: [] });
+    this.setConnection({ status: "offline", nextRetryAt: null, detail: "네트워크에 연결되어 있지 않습니다." });
   };
 
   private clearTimers() {
@@ -216,7 +237,9 @@ export class BoardClient {
   // ---- protocol -------------------------------------------------------------
 
   private send(msg: ClientMessage) {
-    if (this.ws?.readyState === WebSocket.OPEN) this.ws.send(JSON.stringify(msg));
+    if (this.ws?.readyState !== WebSocket.OPEN) return false;
+    this.ws.send(JSON.stringify(msg));
+    return true;
   }
 
   /** Sends every pending op not yet written to the current socket, in order. */
@@ -225,8 +248,7 @@ export class BoardClient {
     const sent = new Set<string>();
     for (const p of this.state.sync.pending) {
       if (p.sent) continue;
-      this.send({ type: "op", op: p.op });
-      sent.add(p.op.opId);
+      if (this.send({ type: "op", op: p.op })) sent.add(p.op.opId);
     }
     if (sent.size) this.update({ sync: markSent(this.state.sync, sent) });
   }

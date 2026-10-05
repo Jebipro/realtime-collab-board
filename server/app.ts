@@ -49,6 +49,9 @@ export function startServer(opts: { port: number; staticDir?: string }): Promise
   const socketOf = new WeakMap<Send, WebSocket>();
 
   wss.on("connection", (ws) => {
+    // Protocol errors (oversized payload, invalid UTF-8) emit `error` before close.
+    // Without a listener, one malformed frame terminates the entire Node process.
+    ws.on("error", () => ws.terminate());
     alive.set(ws, true);
     ws.on("pong", () => alive.set(ws, true));
 
@@ -80,8 +83,8 @@ export function startServer(opts: { port: number; staticDir?: string }): Promise
         send({ type: "error", message: "먼저 room에 join해야 합니다." });
         return;
       }
-      if (msg.type === "sync") joined.room.sync(joined.clientId);
-      else joined.room.handleOp(joined.clientId, msg.op);
+      if (msg.type === "sync") joined.room.sync(joined.clientId, joined.send);
+      else joined.room.handleOp(joined.clientId, msg.op, joined.send);
     });
 
     ws.on("close", () => {

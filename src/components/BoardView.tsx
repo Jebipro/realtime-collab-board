@@ -119,6 +119,7 @@ export function BoardView({ client, snap, selfName }: { client: BoardClient; sna
                 card={card}
                 pending={pendingIds.has(card.id)}
                 textLocked={hasPendingText(sync, card.id)}
+                rejectedEdit={sync.rejectedEdits.get(card.id)}
                 autoEdit={autoEditId === card.id}
                 onAutoEditConsumed={() => setAutoEditId(null)}
                 onMove={move}

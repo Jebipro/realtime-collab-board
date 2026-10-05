@@ -71,6 +71,7 @@ type Obj = Record<string, unknown>;
 const isObj = (v: unknown): v is Obj => typeof v === "object" && v !== null && !Array.isArray(v);
 const isId = (v: unknown): v is string => typeof v === "string" && ID_RE.test(v);
 const isNum = (v: unknown): v is number => typeof v === "number" && Number.isFinite(v);
+const isVersion = (v: unknown): v is number => typeof v === "number" && Number.isSafeInteger(v) && v >= 0;
 const isText = (v: unknown): v is string => typeof v === "string" && v.length <= MAX_TEXT_LENGTH;
 
 export const clampX = (x: number) => Math.round(Math.min(Math.max(x, 0), BOARD_WIDTH - CARD_WIDTH));
@@ -103,7 +104,7 @@ export function parseOp(v: unknown): Op | null {
       };
     }
     case "card.update":
-      if (!isId(v.cardId) || !isText(v.text) || !Number.isInteger(v.baseTextVersion)) return null;
+      if (!isId(v.cardId) || !isText(v.text) || !isVersion(v.baseTextVersion)) return null;
       return {
         kind: "card.update",
         opId: v.opId,
@@ -148,11 +149,48 @@ export function parseClientMessage(raw: string): ClientMessage | null {
   }
 }
 
+const isParticipant = (v: unknown): v is Participant =>
+  isObj(v) && isId(v.clientId) && typeof v.name === "string" && normalizeName(v.name) === v.name;
+
+const isParticipants = (v: unknown): v is Participant[] =>
+  Array.isArray(v) && v.every(isParticipant) && new Set(v.map((p) => p.clientId)).size === v.length;
+
+const isCard = (v: unknown): v is Card =>
+  isObj(v) && isId(v.id) && isNum(v.x) && clampX(v.x) === v.x && isNum(v.y) && clampY(v.y) === v.y &&
+  isText(v.text) && CARD_COLORS.includes(v.color as CardColor) && isVersion(v.textVersion) &&
+  isId(v.createdBy) && typeof v.authorName === "string" && normalizeName(v.authorName) === v.authorName;
+
+const isSnapshot = (v: unknown): v is Snapshot =>
+  isObj(v) && isVersion(v.revision) && Array.isArray(v.cards) && v.cards.length <= MAX_CARDS_PER_ROOM &&
+  v.cards.every(isCard) && new Set(v.cards.map((c) => c.id)).size === v.cards.length;
+
+const REJECT_REASONS: readonly string[] = ["stale", "not_found", "invalid", "duplicate_id", "limit"];
+
 export function parseServerMessage(raw: string): ServerMessage | null {
   try {
     const v = JSON.parse(raw);
     if (!isObj(v) || typeof v.type !== "string") return null;
-    return v as unknown as ServerMessage;
+    switch (v.type) {
+      case "welcome":
+        return isParticipant(v.self) && isSnapshot(v.snapshot) && isParticipants(v.participants)
+          ? { type: "welcome", self: v.self, snapshot: v.snapshot, participants: v.participants } : null;
+      case "snapshot":
+        return isSnapshot(v.snapshot) ? { type: "snapshot", snapshot: v.snapshot } : null;
+      case "op": {
+        const op = parseOp(v.op);
+        return op && isVersion(v.revision) && v.revision > 0 && isId(v.by)
+          ? { type: "op", revision: v.revision, op, by: v.by } : null;
+      }
+      case "reject":
+        return isId(v.opId) && typeof v.reason === "string" && REJECT_REASONS.includes(v.reason) && typeof v.message === "string"
+          ? { type: "reject", opId: v.opId, reason: v.reason as RejectReason, message: v.message } : null;
+      case "presence":
+        return isParticipants(v.participants) ? { type: "presence", participants: v.participants } : null;
+      case "error":
+        return typeof v.message === "string" ? { type: "error", message: v.message } : null;
+      default:
+        return null;
+    }
   } catch {
     return null;
   }

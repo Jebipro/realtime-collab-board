@@ -59,6 +59,18 @@ const isPresence = (n: number) => (m: ServerMessage): m is Extract<ServerMessage
   m.type === "presence" && m.participants.length === n;
 
 describe("WebSocket server", () => {
+  it.each(["oversized", "invalid UTF-8"])("survives a %s WebSocket frame", async (kind) => {
+    const a = await connect("a", "Alice");
+    const closed = new Promise<void>((resolve) => a.ws.once("close", () => resolve()));
+    a.ws.send(kind === "oversized" ? Buffer.alloc(16 * 1024 + 1) : Buffer.from([0xff]), { binary: false });
+    await closed;
+    const b = await connect("b", "Bob");
+    const op = create("still-alive");
+    b.send({ type: "op", op });
+    expect(await b.next(isOp(op.opId))).toMatchObject({ revision: 1 });
+    b.ws.close();
+  });
+
   it("broadcasts A's op to B and keeps presence in sync on disconnect", async () => {
     const a = await connect("a", "Alice");
     const b = await connect("b", "Bob");
