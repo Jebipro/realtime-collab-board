@@ -26,9 +26,9 @@ export function ConnectionStatus({ connection, onRetry }: { connection: Connecti
   const now = useNow(connection.status === "reconnecting");
   const { status, attempt, maxAttempts, nextRetryAt } = connection;
   let detail = "";
-  if (status === "reconnecting" && nextRetryAt) {
-    const secs = Math.max(0, Math.ceil((nextRetryAt - now) / 1000));
-    detail = secs > 0 ? ` ${secs}초 후 재시도 (${attempt}/${maxAttempts})` : ` (${attempt}/${maxAttempts})`;
+  if (status === "reconnecting") {
+    const secs = nextRetryAt ? Math.ceil((nextRetryAt - now) / 1000) : 0;
+    detail = secs > 0 ? ` ${secs}초 후 재시도 (${attempt}/${maxAttempts})` : ` 시도 중 (${attempt}/${maxAttempts})`;
   }
   return (
     <div className={`conn conn-${status}`} role="status" aria-live="polite">

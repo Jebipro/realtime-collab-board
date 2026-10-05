@@ -21,6 +21,8 @@ export interface Card {
   /** Incremented on every accepted text change; used for stale-edit detection. */
   textVersion: number;
   createdBy: string;
+  /** Display name at creation; kept on the card so it survives the author leaving. */
+  authorName: string;
 }
 
 export interface Snapshot {
@@ -37,7 +39,7 @@ export type Op =
   | {
       kind: "card.create";
       opId: string;
-      card: Pick<Card, "id" | "x" | "y" | "text" | "color">;
+      card: Pick<Card, "id" | "x" | "y" | "text" | "color" | "authorName">;
     }
   | { kind: "card.update"; opId: string; cardId: string; text: string; baseTextVersion: number }
   | { kind: "card.move"; opId: string; cardId: string; x: number; y: number }
@@ -90,7 +92,14 @@ export function parseOp(v: unknown): Op | null {
       return {
         kind: "card.create",
         opId: v.opId,
-        card: { id: c.id, x: clampX(c.x), y: clampY(c.y), text: c.text, color: c.color as CardColor },
+        card: {
+          id: c.id,
+          x: clampX(c.x),
+          y: clampY(c.y),
+          text: c.text,
+          color: c.color as CardColor,
+          authorName: normalizeName(c.authorName) ?? "Guest",
+        },
       };
     }
     case "card.update":

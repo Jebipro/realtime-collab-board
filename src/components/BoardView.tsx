@@ -22,11 +22,6 @@ export function BoardView({ client, snap, selfName }: { client: BoardClient; sna
 
   const cards = useMemo(() => Object.values(sync.view), [sync.view]);
   const pendingIds = useMemo(() => pendingCardIds(sync), [sync]);
-  const names = useMemo(() => {
-    const m = new Map(participants.map((p) => [p.clientId, p.name]));
-    m.set(client.clientId, selfName);
-    return m;
-  }, [participants, client.clientId, selfName]);
 
   const createAt = useCallback(
     (x: number, y: number) => {
@@ -40,11 +35,12 @@ export function BoardView({ client, snap, selfName }: { client: BoardClient; sna
           y: clampY(y),
           text: "",
           color: CARD_COLORS[Math.floor(Math.random() * CARD_COLORS.length)],
+          authorName: selfName,
         },
       });
       if (ok) setAutoEditId(id);
     },
-    [client],
+    [client, selfName],
   );
 
   /** Toolbar button: place the card in the middle of what's currently visible, nudged to avoid exact stacking. */
@@ -121,7 +117,6 @@ export function BoardView({ client, snap, selfName }: { client: BoardClient; sna
               <CardView
                 key={card.id}
                 card={card}
-                authorName={names.get(card.createdBy) ?? "떠난 참가자"}
                 pending={pendingIds.has(card.id)}
                 textLocked={hasPendingText(sync, card.id)}
                 autoEdit={autoEditId === card.id}

@@ -9,7 +9,6 @@ const KEY_STEP_LARGE = 100;
 
 interface Props {
   card: Card;
-  authorName: string;
   /** Has unacknowledged local ops. */
   pending: boolean;
   /** Has an unacknowledged text edit; editing again waits for it to settle. */
@@ -39,7 +38,7 @@ interface Edit {
 }
 
 export const CardView = memo(function CardView(props: Props) {
-  const { card, authorName, pending, textLocked, autoEdit, onAutoEditConsumed, onMove, onSave, onDelete } = props;
+  const { card, pending, textLocked, autoEdit, onAutoEditConsumed, onMove, onSave, onDelete } = props;
   const rootRef = useRef<HTMLDivElement>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const [drag, setDrag] = useState<Drag | null>(null);
@@ -166,7 +165,7 @@ export const CardView = memo(function CardView(props: Props) {
       tabIndex={0}
       role="group"
       aria-roledescription="카드"
-      aria-label={`${label}. 작성자 ${authorName}.${pending ? " 동기화 중." : ""} Enter 편집, 화살표 이동, Delete 삭제`}
+      aria-label={`${label}. 작성자 ${card.authorName}.${pending ? " 동기화 중." : ""} Enter 편집, 화살표 이동, Delete 삭제`}
       onPointerDown={onPointerDown}
       onPointerMove={onPointerMove}
       onPointerUp={(e) => endDrag(e, true)}
@@ -179,7 +178,7 @@ export const CardView = memo(function CardView(props: Props) {
     >
       <div className="card-head">
         <span className="grip" aria-hidden="true">⠿</span>
-        <span className="card-author">{authorName}</span>
+        <span className="card-author">{card.authorName}</span>
         {pending && (
           <span className="card-sync" title="서버 확인 대기 중">
             <span className="sync-dot" aria-hidden="true" />

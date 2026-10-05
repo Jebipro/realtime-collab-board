@@ -82,6 +82,9 @@ export class Room {
       return;
     }
 
+    // The server, not the client, decides the author name shown on a card.
+    if (op.kind === "card.create") op = { ...op, card: { ...op.card, authorName: member.name } };
+
     const result = applyOp(this.cards, op, clientId, MAX_CARDS_PER_ROOM);
     if (!result.ok) {
       member.send({ type: "reject", opId: op.opId, reason: result.reason, message: result.message });
