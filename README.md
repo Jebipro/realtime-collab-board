@@ -1,6 +1,7 @@
 # realtime-collab-board
 
 [![GitHub repository](https://img.shields.io/badge/GitHub-Jebipro%2Frealtime--collab--board-181717?logo=github)](https://github.com/Jebipro/realtime-collab-board)
+[![CI](https://github.com/Jebipro/realtime-collab-board/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/Jebipro/realtime-collab-board/actions/workflows/ci.yml)
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
 
 같은 URL(room)에 접속한 여러 사용자가 카드와 접속자(presence)를 실시간으로 공유하는 작은 협업 보드입니다.
