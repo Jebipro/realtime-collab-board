@@ -1,6 +1,7 @@
 # realtime-collab-board
 
 [![GitHub repository](https://img.shields.io/badge/GitHub-Jebipro%2Frealtime--collab--board-181717?logo=github)](https://github.com/Jebipro/realtime-collab-board)
+[![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
 
 같은 URL(room)에 접속한 여러 사용자가 카드와 접속자(presence)를 실시간으로 공유하는 작은 협업 보드입니다.
 Trello와 가벼운 FigJam 사이 정도의 범위로, **실시간 동기화·optimistic UI·재연결 처리**를 직접 구현하는 데 집중했습니다.
